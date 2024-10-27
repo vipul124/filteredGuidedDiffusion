@@ -5,6 +5,7 @@ import numpy as np
 from FGD import fgdFilter
 from PIL import Image
 from tqdm.auto import tqdm
+from skimage.metrics import structural_similarity as ssim
 from transformers import CLIPTextModel, CLIPTokenizer
 from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler
 from diffusers.image_processor import VaeImageProcessor
@@ -165,15 +166,18 @@ class diffusionModel():
 
 ## B. FGD MOODEL LOGIC (DERIVED FROM VANILLA STABLE DIFFUSION MODEL)
 class fgdModel(diffusionModel):
-    def generateFGD(self, filter: fgdFilter, seed=10):
+    def generateFGD(self, filter: fgdFilter, detail_min=0.5, detail_max=2, similarity_threshold=0.8, t_end=15, norm_steps=50, seed=10):
         filter.reset()
         seed_everything(seed)
 
         latents = self.initial_latents
         timesteps = self.scheduler.timesteps
         s = self.num_steps
-
         guidance_scale = self.guidance_scale
+
+        # detail - adaptive guidance strength 
+        detail = (detail_min + detail_max) / 2
+        filter.set_ST(detail=detail, t_end=t_end, norm_steps=norm_steps, recompute_matrix=False)
 
         for param in self.unet.parameters():
             param.requires_grad = False
@@ -198,6 +202,18 @@ class fgdModel(diffusionModel):
 
             xt_filtered = self.filter_st(latents.detach(), st, noise_pred, filter, t, s)
             s -= 1 
+
+            # calculating SSIM similarity in order to check for adaptive delta 
+            st_np = st.detach().cpu().numpy().squeeze()
+            guide_structure_np = filter.guide_structure.detach().cpu().numpy().squeeze()
+            simi_score = ssim(st_np, guide_structure_np, data_range=st_np.max() - st_np.min())
+            if simi_score < similarity_threshold:
+                detail = min(detail_max, detail * 1.1)
+                print("increased", simi_score)
+            else: 
+                detail = max(detail_min, detail * 0.9)
+                print("decreased", simi_score)
+            filter.set_ST(detail=detail, t_end=t_end, norm_steps=norm_steps)
             
             latents = xt_filtered.detach()
 
