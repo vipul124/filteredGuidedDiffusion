@@ -196,7 +196,7 @@ class fgdModel(diffusionModel):
             latents_new = output.prev_sample
             st = output.pred_original_sample
 
-            xt_filtered = self.filter_st(latents.detach(), st, noise_pred, filter, t, s)
+            xt_filtered = self.filter_st(latents_new.detach(), st, noise_pred, filter, t, s)
             s -= 1 
             
             latents = xt_filtered.detach()
